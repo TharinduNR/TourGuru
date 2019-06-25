@@ -10,15 +10,24 @@ import 'package:tourguru/screens/mapbased_interface/place_details_page.dart';
 import 'package:tourguru/models/place_model.dart';
 import 'package:tourguru/services/google_maps_requests.dart';
 import 'package:tourguru/services/google_place_service.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:location/location.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import '../../radial_menu/flutter_radial_menu.dart';
+
+
 //import 'package:geolocator/geolocator.dart';
 
 class HomePage extends StatefulWidget {
-  HomePage({Key key, this.title}) : super(key: key);
+
+
+  HomePage({Key key, this.title,this.currentLocation}) : super(key: key);
+
 
   // This widget is the home page of your application. It is stateful, meaning
   // that it has a State object (defined below) that contains fields that affect
   // how it looks.
+
 
   // This class is the configuration for the state. It holds the values (in this
   // case the title) provided by the parent (in this case the App widget) and
@@ -26,10 +35,19 @@ class HomePage extends StatefulWidget {
   // always marked "final".
 
   final String title;
+  final String currentLocation;
 
   @override
   _HomePageState createState() => _HomePageState();
 }
+Map<String, double>   _currentLocation = new Map();
+StreamSubscription<Map<String,double>> locationSubscription;
+
+
+Location location = new Location();
+String error;
+
+
 
 Marker malabeMarker = Marker(
   markerId: MarkerId('malabe1'),
@@ -45,16 +63,12 @@ class _HomePageState extends State<HomePage> {
   String _destination = "(6.9356725,79.9842310)";
   String _source = "(6.9130779,79.9724734)";
 
-//
-//  var geolocator = Geolocator();
-//  Position position;
-
   //
 //  var geolocator = Geolocator();
 //  Position position;
 
   Map<MarkerId, Marker> markers = <MarkerId, Marker>{};
-
+  MapType _mapType = MapType.normal;
   Completer<GoogleMapController> _controller = Completer();
   GoogleMapController _mapController;
   GoogleMapsServices _googleMapsServices = GoogleMapsServices();
@@ -64,8 +78,10 @@ class _HomePageState extends State<HomePage> {
   LatLng _lastPosition = _initialPosition;
   final Set<Marker> _markers = {};
   final Set<Polyline> _polyLines = {};
+   bool searchBoxVisibility = false;
+
 //  final Set<Polyline> _polyLines = {};
-//  Position position;
+
   void _incrementCounter() {
     setState(() {
       // This call to setState tells the Flutter framework that something has
@@ -80,17 +96,57 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    if (_places == null) {
-      LocationService.get().getNearbyPlaces().then((data) {
-        this.setState(() {
-          _places = data;
-        });
+
+
+    //Default variable initialized to 0
+    _currentLocation['latitude'] = 0.0;
+    _currentLocation['longitude'] = 0.0;
+
+
+    initPlatformState();
+
+    locationSubscription = location.onLocationChanged().listen((Map<String,double> result){
+
+      setState(() {
+        _currentLocation = result;
+
+        if (_places == null) {
+          print(_currentLocation['latitude'].toString()+","+_currentLocation['longitude'].toString()+'********');
+          LocationService.get().getNearbyPlaces(_currentLocation).then((data) {
+            this.setState(() {
+              _places = data;
+            });
+          });
+        }
       });
-    }
+    });
+
+
   }
 
   double zoomVal = 5.0;
   String _currentPlaceId;
+
+  void initPlatformState () async{
+
+    Map<String,double> my_location;
+    try{
+      my_location = await location.getLocation();
+      error = "";
+    }on PlatformException catch(e){
+      if(e.code == 'PERMISSION_DENIED')
+        error = "Permission Denied";
+      else if(e.code == 'PERMISSION_DENIED_NEVER_ASK')
+        error = "Permission Denied - Give the needed permission to get current location.";
+      my_location = null;
+    }
+
+    setState(() {
+      _currentLocation = my_location;
+    });
+  }
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -98,7 +154,7 @@ class _HomePageState extends State<HomePage> {
     // by the _incrementCounter method above.
     onItemTapped = () => Navigator.of(context).push(new MaterialPageRoute(
         builder: (BuildContext context) =>
-        new PlaceDetailPage(_currentPlaceId)));
+        new PlaceDetailPage(_currentPlaceId,_currentLocation)));
     // The Flutter framework has been optimized to make rerunning build methods
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
@@ -107,26 +163,34 @@ class _HomePageState extends State<HomePage> {
         child: Scaffold(
           appBar: AppBar(
             title: Text("TourGuru"),
-            // Here we take the value from the MyHomePage object that was created by
+            elevation: 50.0,
+
+//            bottom: PreferredSize(child: Icon(Icons.linear_scale,size: 60.0,), preferredSize: Size.fromHeight(50.0)),// Here we take the value from the MyHomePage object that was created by
             // the App.build method, and use it to set our appbar title.
 
             bottom: TabBar(tabs: [
-              Tab(icon: Icon(Icons.map)),
-              Tab(icon: Icon(Icons.location_city)),
+              Tab(icon: Icon(FontAwesomeIcons.map,size: 20.0,)),
+              Tab(icon: Icon(FontAwesomeIcons.city,size: 20.0,)),
             ]),
 
             actions: <Widget>[
               IconButton(
-                  icon: Icon(FontAwesomeIcons.searchLocation),
+                  icon: Icon(FontAwesomeIcons.search),
                   onPressed: () {
                     //Navigation Pane
+                     _searchlocation();
 
-                    Drawer drawer = new Drawer();
-
-                    return drawer;
+//                    Drawer drawer = new Drawer();
+//
+//                    return drawer;
                   }),
+              IconButton(
+                icon: Icon(FontAwesomeIcons.tags),
+              ),
+
             ],
           ),
+
           drawer: new Drawer(
             child: new ListView(
               children: <Widget>[
@@ -192,122 +256,136 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
-          floatingActionButtonLocation:
-          FloatingActionButtonLocation.miniStartTop,
-          floatingActionButton: new RadialMenu(
-            items: <RadialMenuItem<int>>[
-              const RadialMenuItem<int>(
-                  value: 1, child: const Icon(Icons.map, size: 50)),
-              const RadialMenuItem<int>(
-                  value: 2, child: const Icon(Icons.camera_front, size: 50)),
-              const RadialMenuItem<int>(
-                  value: 3, child: const Icon(Icons.audiotrack, size: 50)),
-              const RadialMenuItem<int>(
-                  value: 4, child: const Icon(Icons.explore, size: 60)),
-            ],
-            radius: 100.0,
-            onSelected: null,
-          ),
+//          floatingActionButtonLocation:
+//          FloatingActionButtonLocation.miniStartTop,
+//          floatingActionButton: new RadialMenu(
+//            items: <RadialMenuItem<int>>[
+//              const RadialMenuItem<int>(
+//                  value: 1, child: const Icon(Icons.map, size: 50)),
+//              const RadialMenuItem<int>(
+//                  value: 2, child: const Icon(Icons.camera_front, size: 50)),
+//              const RadialMenuItem<int>(
+//                  value: 3, child: const Icon(Icons.audiotrack, size: 50)),
+//              const RadialMenuItem<int>(
+//                  value: 4, child: const Icon(Icons.explore, size: 60)),
+//            ],
+//            radius: 100.0,
+//            onSelected: null,
+//          ),
           body: TabBarView(
             physics: NeverScrollableScrollPhysics(),
             children: <Widget>[
               Stack(children: <Widget>[
                 //Create Google Map Interface
                 _googlemap(context),
-                Positioned(
-                  top: 50.0,
-                  right: 15.0,
-                  left: 15.0,
-                  child: Container(
-                    height: 50.0,
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(3.0),
-                      color: Colors.white,
-                      boxShadow: [
-                        BoxShadow(
-                            color: Colors.grey,
-                            offset: Offset(1.0, 5.0),
-                            blurRadius: 10,
-                            spreadRadius: 3)
-                      ],
-                    ),
-                    child: TextField(
-                      cursorColor: Colors.black,
-                      controller: locationController,
-                      decoration: InputDecoration(
-                        icon: Container(
-                          margin: EdgeInsets.only(left: 20, top: 5),
-                          width: 10,
-                          height: 10,
-                          child: Icon(
-                            Icons.location_on,
-                            color: Colors.black,
+
+                Visibility(
+
+                  child:AnimatedOpacity(opacity: searchBoxVisibility ? 1.0 : 0.0, duration:Duration(milliseconds: 500), child:
+
+                  Stack(children: <Widget>[
+
+                      Positioned(
+                        top: 60.0,
+                        right: 15.0,
+                        left: 15.0,
+                        child: Container(
+                          height: 50.0,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(3.0),
+                            color: Colors.white,
+                            boxShadow: [
+                              BoxShadow(
+                                  color: Colors.grey,
+                                  offset: Offset(1.0, 5.0),
+                                  blurRadius: 10,
+                                  spreadRadius: 3)
+                            ],
+                          ),
+                          child: TextField(
+                            cursorColor: Colors.black,
+                            controller: locationController,
+                            decoration: InputDecoration(
+                              icon: Container(
+                                margin: EdgeInsets.only(left: 20, top: 5),
+                                width: 10,
+                                height: 10,
+                                child: Icon(
+                                  Icons.location_on,
+                                  color: Colors.black,
+                                ),
+                              ),
+                              hintText: "Start location",
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.only(left: 15.0, top: 16.0),
+                            ),
                           ),
                         ),
-                        hintText: "pick up",
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.only(left: 15.0, top: 16.0),
                       ),
-                    ),
-                  ),
-                ),
 
-                Positioned(
-                  top: 105.0,
-                  right: 15.0,
-                  left: 15.0,
-                  child: Container(
-                    height: 50.0,
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(3.0),
-                      color: Colors.white,
-                      boxShadow: [
-                        BoxShadow(
-                            color: Colors.grey,
-                            offset: Offset(1.0, 5.0),
-                            blurRadius: 10,
-                            spreadRadius: 3)
-                      ],
-                    ),
-                    child: TextField(
-                      cursorColor: Colors.black,
-                      controller: destinationController,
-                      textInputAction: TextInputAction.go,
-                      onSubmitted: (value) {
-//                        sendRequest(value);
-                      },
-                      decoration: InputDecoration(
-                        icon: Container(
-                          margin: EdgeInsets.only(left: 20, top: 5),
-                          width: 10,
-                          height: 10,
-                          child: Icon(
-                            Icons.local_taxi,
-                            color: Colors.black,
+                      Positioned(
+                        top: 120.0,
+                        right: 15.0,
+                        left: 15.0,
+                        child: Container(
+                          height: 50.0,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(3.0),
+                            color: Colors.white,
+                            boxShadow: [
+                              BoxShadow(
+                                  color: Colors.grey,
+                                  offset: Offset(1.0, 5.0),
+                                  blurRadius: 10,
+                                  spreadRadius: 3)
+                            ],
+                          ),
+                          child: TextField(
+                            cursorColor: Colors.black,
+                            controller: destinationController,
+                            textInputAction: TextInputAction.go,
+                            onSubmitted: (value) {
+//                                sendRequest(value);
+                            },
+                            decoration: InputDecoration(
+                              icon: Container(
+                                margin: EdgeInsets.only(left: 20, top: 5),
+                                width: 10,
+                                height: 10,
+                                child: Icon(
+                                  Icons.local_taxi,
+                                  color: Colors.black,
+                                ),
+                              ),
+                              hintText: "End location",
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.only(left: 15.0, top: 16.0),
+                            ),
                           ),
                         ),
-                        hintText: "destination?",
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.only(left: 15.0, top: 16.0),
                       ),
-                    ),
-                  ),
+
+
+                  ],),
+
                 ),
 
+              ),
 //        Positioned(
 //          top: 40,
 //          right: 10,
 //          child: FloatingActionButton(onPressed: _onAddMarkerPressed,
-//          tooltip: "aadd marker",
+//          tooltip: "add marker",
 //          backgroundColor: black,
 //          child: Icon(Icons.add_location, color: white,),
 //          ),
                 _zoomminusfunction(),
                 _zoomplusfunction(),
-                _compassFunc(),
-                _buildContainer(),
+                _mapTypeCycler(),
+//                _compassFunc(),
+//                _buildContainer(),
               ]),
               _createContent(),
             ],
@@ -352,6 +430,21 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+
+
+  Widget _searchlocation(){
+
+    setState(() {
+//      if(searchBoxVisibility)
+//        searchBoxVisibility=false;
+//      else
+//        searchBoxVisibility=true;
+      searchBoxVisibility = !searchBoxVisibility;
+    });
+
+
+  }
+
   final _biggerFont = const TextStyle(fontSize: 18.0);
 
   Widget _compassFunc() {
@@ -369,7 +462,8 @@ class _HomePageState extends State<HomePage> {
         ));
   }
 
-  void _currentPosition() {
+
+   void _currentPosition() {
     var markerIdVal = new DateTime.now().millisecondsSinceEpoch.toString();
     final MarkerId markerId = MarkerId(markerIdVal);
 
@@ -441,14 +535,14 @@ class _HomePageState extends State<HomePage> {
     Navigator.push(
         context,
         new MaterialPageRoute(
-            builder: (BuildContext context) => new PlaceDetailPage(place.id)));
+            builder: (BuildContext context) => new PlaceDetailPage(place.id,_currentLocation)));
   }
 
   Widget _zoomminusfunction() {
     return Align(
-      alignment: Alignment(1, -0.8),
+      alignment: Alignment.bottomRight,
       child: IconButton(
-          icon: Icon(FontAwesomeIcons.searchMinus, color: Color(0xff6200ee)),
+          icon: Icon(FontAwesomeIcons.searchMinus, color: Colors.blueAccent),
           onPressed: () {
             zoomVal--;
             _minus(zoomVal);
@@ -458,14 +552,28 @@ class _HomePageState extends State<HomePage> {
 
   Widget _zoomplusfunction() {
     return Align(
-      alignment: Alignment.topRight,
+      alignment: Alignment(1,0.8),
       child: IconButton(
-          icon: Icon(FontAwesomeIcons.searchPlus, color: Color(0xff6200ee)),
+          icon: Icon(FontAwesomeIcons.searchPlus, color: Colors.blueAccent),
           onPressed: () {
             zoomVal++;
             _plus(zoomVal);
           }),
     );
+  }
+  Widget _mapTypeCycler() {
+    final MapType nextType =
+    MapType.values[(_mapType.index + 1) % MapType.values.length];
+    return Align(
+      alignment: Alignment(-1,-1),
+      child: IconButton(
+          icon: Icon(FontAwesomeIcons.laptopCode,color: Colors.blue),
+            onPressed: () {
+                 setState(() {
+                _mapType = nextType;
+            });
+      },
+    ));
   }
 
   Future<void> _minus(double zoomVal) async {
@@ -654,8 +762,9 @@ class _HomePageState extends State<HomePage> {
         width: MediaQuery.of(context).size.width,
         child: GoogleMap(
 
-          mapType: MapType.normal,
-          initialCameraPosition:
+
+
+        initialCameraPosition:
           CameraPosition(target: LatLng(6.9356725, 79.9842310), zoom: 12),
           scrollGesturesEnabled: true,
           tiltGesturesEnabled: true,
@@ -663,19 +772,22 @@ class _HomePageState extends State<HomePage> {
           myLocationEnabled: true,
           compassEnabled: true,
           zoomGesturesEnabled: true,
-
           onMapCreated: _onCreated,
           markers: _markers,
           onCameraMove: _onCameraMove,
           polylines: _polyLines,
+          mapType: _mapType ,
 //          markers: {malabeMarker, malabeMarker2},
         ));
+
   }
+
 
   void _onCreated(GoogleMapController controller) {
     setState(() {
       _mapController = controller;
       _controller.complete(controller);
+
     });
   }
 
